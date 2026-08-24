@@ -1,0 +1,65 @@
+services:
+  # ─── Base de datos ───────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pdfsuite}
+      POSTGRES_USER: ${POSTGRES_USER:-pdfuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?La variable POSTGRES_PASSWORD es obligatoria en .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pdfuser} -d ${POSTGRES_DB:-pdfsuite}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ─── API Backend (FastAPI + Python 3.12) ─────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-pdfuser}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pdfsuite}
+      STORE_PATH: /store
+      SECRET_KEY: ${SECRET_KEY:?La variable SECRET_KEY es obligatoria en .env}
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-100}
+      DEFAULT_EXPIRY_DAYS: ${DEFAULT_EXPIRY_DAYS:-30}
+      CORS_ORIGINS: "http://localhost:3000"
+    volumes:
+      - ./store:/store
+      - ./backend:/app          # hot-reload en desarrollo
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  # ─── Frontend (Next.js 15) ─────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    command: npm run dev
+
+volumes:
+  pgdata:
+    driver: local
