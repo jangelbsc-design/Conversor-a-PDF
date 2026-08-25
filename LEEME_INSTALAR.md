@@ -61,6 +61,7 @@ backend\.env    ← configuración generada automáticamente (no compartir)
 
 | Síntoma | Solución |
 |---|---|
+| Doble clic en INICIAR **.ps1** pregunta "¿abrir con...?" | Normal: usa siempre los archivos **.BAT** (INICIAR.bat), nunca los .ps1 |
 | Windows protegió el archivo .bat | Clic derecho → Propiedades → Desbloquear |
 | "No se puede ejecutar scripts" | Usar los `.bat`, no los `.ps1` directamente |
 | `pip` falla con error SSL/red | Tu red usa proxy: `backend\.venv\Scripts\python.exe -m pip config set global.proxy http://proxy:puerto` y repetir PREPARAR |

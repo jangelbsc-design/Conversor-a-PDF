@@ -1,6 +1,6 @@
 # 📌 RECUÉRDAME — Estado del proyecto "Conversor a PDF"
 
-> Última actualización: 24 de agosto de 2026
+> Última actualización: 25 de agosto de 2026 (VBS fix)
 
 ---
 
@@ -135,18 +135,49 @@ GitHub solo guarda el código, no la app corriendo. Opciones cuando se quiera:
     genera `backend\.env` con rutas relativas al script + SECRET_KEY aleatoria,
     LibreOffice opcional descargado y extraído con `msiexec /a` a
     `%USERPROFILE%\LibreOfficeExtract` (misma ruta que ya busca `_find_soffice()`).
-  - `INICIAR.bat/.ps1` → arranca backend+frontend, espera health checks,
-    abre navegador; libera puertos 8000/3000 preguntando antes.
-  - `DETENER.bat/.ps1` → mata procesos vía logs\*.pid + puertos.
+  - `INICIAR.bat/.ps1` → arranca backend+frontend, abre navegador.
+  - `DETENER.bat/.ps1` → mata procesos por puerto.
   - `LEEME_INSTALAR.md` → guía paso a paso del destinatario.
 - Correcciones de portabilidad aplicadas:
   - `requirements.txt`: añadido `aiosqlite==0.22.1` (faltaba, rompía SQLite)
     y `python-magic-bin==0.4.14 ; sys_platform == "win32"` (en Windows el
     paquete correcto es magic-bin, no python-magic).
   - `.gitignore`: añadidos `logs/`, `tools/`, `*.zip`.
-- Validado localmente: sintaxis PS OK, URL SQLite con espacios abre OK,
-  ZIP sin .env ni carpetas prohibidas.
-- Pendiente: probar el flujo completo PREPARAR→INICIAR en una máquina limpia.
+- Validado: sintaxis PS OK, URL SQLite con espacios abre OK, ZIP limpio.
+
+---
+
+## 🐛 BUG CRÍTICO + SOLUCIÓN: servicios mueren al cerrar el script
+
+**Problema (resuelto 25-ago-2026)**: `.bat` con `start /min` y PowerShell
+`Start-Process` no crean procesos desvinculados. Al cerrar el proceso padre,
+los hijos mueren.
+
+**Solución**: VBScript con `WScript.Shell.Run` (WindowStyle=7, bWait=False).
+Este método SÍ crea procesos verdaderamente desvinculados del padre en Windows.
+Es el approach estándar para servicios background en scripts Windows desde los
+años 2000.
+
+- `INICIAR.vbs` → arranca backend+frontend invisibles, abre navegador
+- `DETENER.vbs` → mata procesos por puerto + diálogo de confirmación
+- Acceso directo "PDF Suite.lnk" en el Escritorio → INICIAR.vbs
+- Verificado: procesos vivos después de 75+ segundos, health 200 OK
+
+**Archivos (.bat y .ps1 quedan obsoletos)**:
+- `INICIAR.bat` / `INICIAR.ps1` → ya no usar (mueren al salir)
+- `DETENER.bat` / `DETENER.ps1` → ya no usar
+- **Usar solo**: `INICIAR.vbs` / `DETENER.vbs` o el acceso directo del Escritorio
+
+---
+
+## 🖱️ Uso diario en ESTA máquina (resuelto 25-ago-2026)
+
+- **Un solo ícono en el Escritorio**: "PDF Suite.lnk"
+- Doble clic → se abre la app automáticamente en el navegador
+- Para cerrar: cerrar la pestaña del navegador (los servicios quedan en
+  background y se reutilizan al abrir de nuevo) o ejecutar `DETENER.vbs`
+- Los servicios sobreviven al cerrar ventanas, cerrar el script, etc.
+- **NO USAR** los `.bat` / `.ps1` (quedan obsoletos, causaban el bug)
 
 ---
 

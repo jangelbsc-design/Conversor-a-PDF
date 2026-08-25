@@ -1,10 +1,10 @@
 # ============================================================
 #  PDF Suite Local - INICIAR
-#  Arranca backend (puerto 8000) y frontend (puerto 3000),
-#  espera a que ambos respondan y abre el navegador.
+#  Doble clic -> la app se abre. Sin ventanas visibles.
+#  Si ya esta corriendo -> solo abre el navegador.
 # ============================================================
 #requires -Version 5.1
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "SilentlyContinue"
 
 $Root     = $PSScriptRoot
 $LogsDir  = Join-Path $Root "logs"
@@ -12,124 +12,55 @@ $Backend  = Join-Path $Root "backend"
 $Frontend = Join-Path $Root "frontend"
 New-Item -ItemType Directory -Force -Path $LogsDir | Out-Null
 
-function Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
-function Ok($msg)   { Write-Host "    [OK] $msg" -ForegroundColor Green }
-function Warn($msg) { Write-Host "    [!!] $msg" -ForegroundColor Yellow }
-
-Write-Host "=============================================" -ForegroundColor Magenta
-Write-Host "  PDF Suite Local - INICIO"                    -ForegroundColor Magenta
-Write-Host "=============================================" -ForegroundColor Magenta
-
-# ------------------------------------------------------------
-# Comprobaciones previas
-# ------------------------------------------------------------
-if (-not (Test-Path (Join-Path $Backend ".env"))) {
-    throw "Falta backend\.env. Ejecuta primero PREPARAR.bat"
+function Test-Url($url) {
+    try { return (Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200 }
+    catch { return $false }
 }
-$VenvPy = Join-Path $Backend ".venv\Scripts\python.exe"
-if (-not (Test-Path $VenvPy)) {
-    # Respaldo: usar el Python global si ya tiene las dependencias instaladas
-    $globalPy = (Get-Command python -ErrorAction SilentlyContinue).Source
-    if ($globalPy) {
-        Warn "Sin backend\.venv: usando Python global ($globalPy)"
-        $VenvPy = $globalPy
-    } else {
-        throw "Falta el entorno virtual Python y no hay Python en PATH. Ejecuta PREPARAR.bat"
-    }
+function Aviso($msg) {
+    Add-Type -AssemblyName System.Windows.Forms
+    [System.Windows.Forms.MessageBox]::Show($msg, "PDF Suite", 0, 48) | Out-Null
 }
 
-function Test-FreePort($port, $name) {
-    $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-    if ($conn) {
-        $pids = ($conn.OwningProcess | Sort-Object -Unique) -join ", "
-        Warn "El puerto $port ($name) ya esta ocupado por el proceso PID $pids."
-        $ans = Read-Host "    Terminar ese proceso y continuar? (S/n)"
-        if ($ans -notmatch "^[nN]") {
-            foreach ($procId in ($conn.OwningProcess | Sort-Object -Unique)) {
-                try { taskkill /PID $procId /T /F 2>$null | Out-Null } catch {}
-            }
-            Start-Sleep -Seconds 1
-        } else {
-            throw "Puerto $port ocupado; libera el puerto y vuelve a intentarlo."
-        }
-    }
-}
-Test-FreePort 8000 "API backend"
-Test-FreePort 3000 "web frontend"
-
-# Node local (si se instalo con PREPARAR)
-$LocalNodeDir = Get-ChildItem -Directory (Join-Path $Root "tools") -Filter "node-*" -ErrorAction SilentlyContinue |
-                Select-Object -First 1
-if ($LocalNodeDir) { $env:Path += ";" + $LocalNodeDir.FullName }
-
-# ------------------------------------------------------------
-# Backend
-# ------------------------------------------------------------
-Step "Arrancando API backend (puerto 8000)..."
-$BkProc = Start-Process -FilePath $VenvPy `
-    -ArgumentList "-m","uvicorn","app.main:app","--host","127.0.0.1","--port","8000" `
-    -WorkingDirectory $Backend -WindowStyle Minimized -PassThru `
-    -RedirectStandardOutput (Join-Path $LogsDir "backend.log") `
-    -RedirectStandardError  (Join-Path $LogsDir "backend.err.log")
-$BkProc.Id | Set-Content (Join-Path $LogsDir "backend.pid")
-
-$Ready = $false
-for ($i = 0; $i -lt 30; $i++) {
-    Start-Sleep -Seconds 1
-    try {
-        $r = Invoke-WebRequest -Uri "http://127.0.0.1:8000/health" -UseBasicParsing -TimeoutSec 2
-        if ($r.StatusCode -eq 200) { $Ready = $true; break }
-    } catch {}
-}
-if (-not $Ready) {
-    Warn "El backend no respondio en 30 s. Revisa logs\backend.err.log"
-} else {
-    Ok "API lista en http://localhost:8000"
+# --- Ya esta corriendo? -> navegador y listo ---
+if ((Test-Url "http://127.0.0.1:8000/health") -and (Test-Url "http://localhost:3000")) {
+    Start-Process "http://localhost:3000"; exit 0
 }
 
-# ------------------------------------------------------------
-# Frontend
-# ------------------------------------------------------------
-Step "Arrancando web frontend (puerto 3000)..."
-$NpmCmd = (Get-Command npm.cmd -ErrorAction SilentlyContinue).Source
-if (-not $NpmCmd -and $LocalNodeDir) { $NpmCmd = Join-Path $LocalNodeDir.FullName "npm.cmd" }
-if (-not $NpmCmd) { throw "npm no encontrado. Ejecuta PREPARAR.bat" }
+# --- Limpiar restos ---
+foreach ($p in @(8000, 3000)) {
+    Get-NetTCPConnection -LocalPort $p -State Listen -EA SilentlyContinue |
+        Select-Object -Expand OwningProcess -Unique |
+        ForEach-Object { taskkill /PID $_ /T /F 2>$null | Out-Null }
+}
+Start-Sleep -Seconds 1
 
-$FeProc = Start-Process -FilePath $NpmCmd `
+# --- Backend ---
+$Py = Join-Path $Backend ".venv\Scripts\python.exe"
+if (-not (Test-Path $Py)) { $Py = (Get-Command python -EA SilentlyContinue).Source }
+if (-not $Py) { Aviso "No se encontro Python. Ejecuta PREPARAR.bat."; exit 1 }
+
+Start-Process -FilePath $Py `
+    -ArgumentList "-m","uvicorn","app.main:app","--host","127.0.0.1","--port","8000","--log-file","$LogsDir\uvicorn.log" `
+    -WorkingDirectory $Backend -WindowStyle Hidden | Out-Null
+
+$ok = $false
+for ($i=0; $i -lt 40; $i++) { Start-Sleep 1; if (Test-Url "http://127.0.0.1:8000/health") { $ok=$true; break } }
+if (-not $ok) { Aviso "El servicio interno no arranco. Revisa logs\uvicorn.log"; exit 1 }
+
+# --- Frontend ---
+$Npm = (Get-Command npm.cmd -EA SilentlyContinue).Source
+if (-not $Npm) {
+    $nd = Get-ChildItem -Directory (Join-Path $Root "tools") -Filter "node-*" -EA SilentlyContinue | Select-Object -First 1
+    if ($nd) { $Npm = Join-Path $nd.FullName "npm.cmd" }
+}
+if (-not $Npm) { Aviso "No se encontro Node.js. Ejecuta PREPARAR.bat."; exit 1 }
+
+Start-Process -FilePath $Npm `
     -ArgumentList "run","dev" `
-    -WorkingDirectory $Frontend -WindowStyle Minimized -PassThru `
-    -RedirectStandardOutput (Join-Path $LogsDir "frontend.log") `
-    -RedirectStandardError  (Join-Path $LogsDir "frontend.err.log")
-$FeProc.Id | Set-Content (Join-Path $LogsDir "frontend.pid")
+    -WorkingDirectory $Frontend -WindowStyle Hidden | Out-Null
 
-$Ready = $false
-for ($i = 0; $i -lt 90; $i++) {
-    Start-Sleep -Seconds 1
-    try {
-        $r = Invoke-WebRequest -Uri "http://localhost:3000" -UseBasicParsing -TimeoutSec 2
-        if ($r.StatusCode -eq 200) { $Ready = $true; break }
-    } catch {}
-}
-if (-not $Ready) {
-    Warn "La web no respondio en 90 s (la primera vez Next tarda mas). Revisa logs\frontend.err.log"
-} else {
-    Ok "Web lista en http://localhost:3000"
-}
+for ($i=0; $i -lt 120; $i++) { Start-Sleep 1; if (Test-Url "http://localhost:3000") { break } }
 
-# ------------------------------------------------------------
-# Navegador
-# ------------------------------------------------------------
-Step "Abriendo navegador..."
+# --- Abrir app ---
 Start-Process "http://localhost:3000"
-
-Write-Host ""
-Write-Host "=============================================" -ForegroundColor Green
-Write-Host "  APP EN MARCHA"                                -ForegroundColor Green
-Write-Host "=============================================" -ForegroundColor Green
-Write-Host ""
-Write-Host "  App web : http://localhost:3000"          -ForegroundColor White
-Write-Host "  API     : http://localhost:8000/health"   -ForegroundColor White
-Write-Host ""
-Write-Host "  Para DETENER todo: doble clic en DETENER.bat" -ForegroundColor Gray
-Write-Host ""
-Read-Host "Pulsa ENTER para cerrar esta ventana (la app sigue corriendo)"
+exit 0

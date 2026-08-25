@@ -1,37 +1,21 @@
-# ============================================================
-#  PDF Suite Local - DETENER
-#  Cierra el backend y el frontend arrancados con INICIAR.bat
-# ============================================================
+# PDF Suite - DETENER (silencioso, sin preguntas)
 #requires -Version 5.1
 $ErrorActionPreference = "SilentlyContinue"
 
-$LogsDir = Join-Path $PSScriptRoot "logs"
-$Stopped = 0
+$pidDir = Join-Path $PSScriptRoot "logs"
 
 foreach ($name in @("backend", "frontend")) {
-    $pidFile = Join-Path $LogsDir "$name.pid"
+    $pidFile = Join-Path $pidDir "$name.pid"
     if (Test-Path $pidFile) {
-        $procId = (Get-Content $pidFile -Raw).Trim()
-        if ($procId) {
-            Write-Host "Deteniendo $name (PID $procId)..."
-            taskkill /PID $procId /T /F | Out-Null
-            if ($LASTEXITCODE -eq 0) { $Stopped++ }
-            Remove-Item $pidFile -Force
-        }
+        $pidVal = (Get-Content $pidFile -Raw).Trim()
+        if ($pidVal) { taskkill /PID $pidVal /T /F 2>$null | Out-Null }
+        Remove-Item $pidFile -Force
     }
 }
 
-# Red de seguridad: matar lo que quede escuchando en los puertos
 foreach ($port in @(8000, 3000)) {
-    $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-    foreach ($procId in ($conn.OwningProcess | Sort-Object -Unique)) {
-        Write-Host "Liberando puerto $port (PID $procId)..."
-        taskkill /PID $procId /T /F | Out-Null
-        if ($LASTEXITCODE -eq 0) { $Stopped++ }
-    }
+    Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique |
+        ForEach-Object { taskkill /PID $_ /T /F 2>$null | Out-Null }
 }
-
-Write-Host ""
-if ($Stopped -gt 0) { Write-Host "Listo: procesos detenidos." -ForegroundColor Green }
-else { Write-Host "No habia procesos de la app en marcha." -ForegroundColor Yellow }
-Read-Host "Pulsa ENTER para cerrar"
+exit 0
