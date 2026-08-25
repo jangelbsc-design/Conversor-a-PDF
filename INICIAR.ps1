@@ -28,7 +28,14 @@ if (-not (Test-Path (Join-Path $Backend ".env"))) {
 }
 $VenvPy = Join-Path $Backend ".venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPy)) {
-    throw "Falta el entorno virtual Python. Ejecuta primero PREPARAR.bat"
+    # Respaldo: usar el Python global si ya tiene las dependencias instaladas
+    $globalPy = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if ($globalPy) {
+        Warn "Sin backend\.venv: usando Python global ($globalPy)"
+        $VenvPy = $globalPy
+    } else {
+        throw "Falta el entorno virtual Python y no hay Python en PATH. Ejecuta PREPARAR.bat"
+    }
 }
 
 function Test-FreePort($port, $name) {
