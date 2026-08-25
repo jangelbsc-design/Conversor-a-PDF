@@ -44,6 +44,11 @@ pgdata/
 Thumbs.db
 desktop.ini
 
+# ─── Distribución / herramientas locales ──────────────────────────
+logs/
+tools/
+*.zip
+
 # ─── IDEs ─────────────────────────────────────────────────────────
 .vscode/settings.json
 .idea/
